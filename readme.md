@@ -1,4 +1,4 @@
-### Documento: Alternativas para Construção de um Projeto de Captura de Dados do Google Reviews com uso do SerpApi
+###Alternativas para Construção de um Projeto de Captura de Dados do Google Reviews com uso do SerpApi
 
 #### 1. **Utilização do SerpApi para Captura de Dados do Google Reviews**
 O **SerpApi** é uma API específica para scraping de dados de mecanismos de busca, incluindo avaliações de negócios no Google Maps. A API já lida com a complexidade de scraping, fornecendo uma interface estruturada e otimizada para a extração de dados.
