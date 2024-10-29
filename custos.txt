@@ -1,0 +1,89 @@
+### 1. **Custos da AWS Step Functions**
+O preço da **AWS Step Functions** é baseado no número de **transições de estado** (cada vez que a execução passa de um estado para outro) e no tipo de máquina de estado que você usa.
+
+- **Transições padrão**: $0.025 por 1.000 transições.
+- **Máquinas expressas**: Para execuções rápidas e de alto volume, custa $1,00 por milhão de execuções, mais $0.00000416 por GB-segundo usado.
+
+com a definição básica da **State Machine**, você tem três estados principais:
+1. Verificar no banco (CheckReviewsInDb).
+2. Buscar novos reviews na API (FetchReviewsFromSerpApi).
+3. Salvar no banco de dados (SaveReviewsInDb).
+
+Isso totaliza **3 transições por execução**, o que custaria:
+- Para **1.000 execuções**: 3 transições por execução x 1.000 execuções = 3.000 transições.
+  - **Custo**: 3.000/1.000 * $0.025 = **$0.075**.
+
+Se o número de execuções for maior, podemos calcular multiplicando o número de transições pelo número de execuções.
+
+#### Exemplo de custo para 100.000 execuções:
+- **100.000 execuções** com 3 transições por execução:
+  - 100.000 * 3 = **300.000 transições**.
+  - Custo: 300.000 / 1.000 * $0.025 = **$7,50**.
+
+### 2. **Custos da AWS Lambda**
+O custo do **AWS Lambda** é baseado em dois fatores:
+- **Número de execuções**.
+- **Duração da execução** (em GB-segundos).
+
+#### Preço do Lambda:
+- **Número de execuções**: Os primeiros 1 milhão de invocações são **gratuitos por mês**.
+  - Depois disso: $0.20 por 1 milhão de solicitações.
+- **Duração**: Custo baseado em **memória alocada** (medida em GB-segundos) e o tempo que a função leva para ser executada.
+  - **Memória**: $0.00001667 por GB-segundo.
+
+Se sua Lambda for executada, por exemplo, em 512 MB de memória por **1 segundo**, isso custaria:
+
+```plaintext
+Cálculo: 512 MB (0.5 GB) * 1 segundo = 0.5 GB-segundos.
+Custo: 0.5 * $0.00001667 = **$0.000008335 por execução**.
+```
+
+Se você tiver 100.000 execuções dessa função em um mês, o custo seria:
+
+```plaintext
+100.000 * $0.000008335 = **$0.83**.
+```
+
+isso depende da **duração** da sua função Lambda. Lambdas que duram mais tempo e têm maior memória alocada custarão mais.
+
+### 3. **Custo do PostgreSQL (RDS)**
+usando o **Amazon RDS** (PostgreSQL), o custo vai depender do tipo de instância, tempo de execução e espaço de armazenamento.
+
+#### Exemplo de custo básico:
+- **Instância db.t3.micro**: custa em média $0.0124 por hora, o que equivale a cerca de $9 por mês se rodar continuamente.
+- **Armazenamento**: Armazenamento de 20 GB para PostgreSQL custa cerca de $0.115 por GB por mês, o que dá cerca de $2,30 por mês para 20 GB.
+
+### 4. **Custo do SerpApi**
+O **SerpApi** é uma API paga para buscar dados de lugares e reviews no Google. O preço depende da quantidade de **solicitações**:
+
+- O plano **básico** começa em $50/mês para **5.000 buscas**.
+- Se precisarmos de mais requisições, há planos maiores.
+
+### Cálculo aproximado para 100.000 execuções/mês:
+
+#### Custo de Step Functions:
+- **Transições**: 100.000 execuções * 3 transições = **$7,50**.
+
+#### Custo de Lambda:
+- **Execuções**: 100.000 execuções (gratuitas até 1 milhão).
+- **Duração de 1 segundo** em 512 MB: $0.83 (caso você exceda o limite gratuito).
+
+#### Custo do PostgreSQL:
+- **Instância db.t3.micro**: ~$9 por mês.
+- **Armazenamento**: ~20 GB a $2,30 por mês.
+
+#### Custo do SerpApi:
+- **Plano básico** (5.000 buscas): $50/mês.
+
+### Custo Total Estimado:
+- **Step Functions**: $7,50.
+- **Lambda**: $0,83.
+- **PostgreSQL**: $9 + $2,30 (armazenamento).
+- **SerpApi**: $50.
+
+**Total estimado**: ~$69,63 por mês para 100.000 execuções (considerando que estamos usando o plano de 5.000 buscas do SerpApi).
+
+### Otimizações:
+1. **Step Functions**: Reduzir transições pode diminuir o custo. 
+2. **Lambda**: Reduzir a duração das funções e otimizar a memória alocada.
+3. **PostgreSQL**: Usar instâncias menores ou otimizadas para burst workloads pode reduzir custos.
