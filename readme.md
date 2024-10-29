@@ -84,3 +84,16 @@ A **utilização do SerpApi** se apresenta como a melhor alternativa para este p
 
 ### Conclusão
 A **utilização do SerpApi** foi escolhida pela sua simplicidade, menor manutenção, e escalabilidade. O teste funcional garantiu a captura correta de dados de uma loja, atendendo aos requisitos do projeto.
+
+###Endpoint 
+endpoint: GET - https://6qj7ftyyxe.execute-api.us-east-1.amazonaws.com/dev/reviews/{context}
+
+contexts= {context}:string = 'nema_humaita' | 'nema_visconde_de_piraja' | 'nema_leblon'
+
+##Executar de forma local com Serveless-offline:
+   Clone o repositório, 
+   Instale as dependencias, npm i ou yarn
+   Instale o Serverless de forma global, npm i -g serverless/serverless-offline (utilize a mesma vesão)
+   Configure suas variaveis de ambiente (.env) conforme .env.example
+   e execute com o comando npm run dev, ou yarn dev
+
