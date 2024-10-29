@@ -1,0 +1,23 @@
+service: google-reviews-scraper
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  
+functions:
+  scrapeReviews:
+    handler: handler.scrapeReviews
+    timeout: 300
+    events:
+      - http:
+          path: scrape
+          method: get
+
+plugins:
+  - serverless-dotenv-plugin
+  - serverless-offline
+
+custom:
+  dotenv:
+    path: .env
