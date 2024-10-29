@@ -8,11 +8,12 @@ provider:
 functions:
   scrapeReviews:
     handler: handler.scrapeReviews
-    timeout: 300
+    timeout: 600
     events:
       - http:
-          path: scrape
+          path: reviews/{context}
           method: get
+          cors: true
 
 plugins:
   - serverless-dotenv-plugin

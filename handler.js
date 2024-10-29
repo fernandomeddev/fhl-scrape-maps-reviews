@@ -5,29 +5,16 @@ const { Pool } = require('pg');
 
 // Configuração do pool de conexões com o banco de dados PostgreSQL
 const pool = new Pool({
-  host: process.env.PG_HOST || 'dev-apiv2.cd4awvrpnf8t.us-east-1.rds.amazonaws.com', // Endereço do servidor PostgreSQL,
-  user: process.env.PG_USER || 'dev',
-  password: process.env.PG_PASSWORD || '%bKcPewQMR+a',
-  database: process.env.PG_DATABASE || 'postgres',
+  host: process.env.PG_HOST,
+  user: process.env.PG_USER,
+  password: process.env.PG_PASSWORD,
+  database: process.env.PG_DATABASE,
   port: process.env.PG_PORT || 5432,
   ssl: { rejectUnauthorized: false },
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
 });
-
-// function to get a Place ID from lat and long const { getJson } = require("serpapi");
-/* getJson({
-  api_key: "5f01c68cad4db434b2d07dce18757cd1ebe0fffc6c18e2e3b2c2ca095655141e",
-  engine: "google_maps",
-  type: "search",
-  google_domain: "google.com",
-  q: "Coffee",
-  ll: "@-22.9841544,-43.2177256,17z",
-  hl: "en"
-}, (json) => {
-  console.log(json);
-}); */
 
 async function getReviewCountFromDb(placeId) {
   // Conectar ao banco de dados
@@ -49,8 +36,8 @@ async function getReviewCountFromDb(placeId) {
 }
 
 async function fetchLatestReviewsFromSerpApi(placeId) {
-  const serpApiKey = process.env.SERP_API_KEY || '5f01c68cad4db434b2d07dce18757cd1ebe0fffc6c18e2e3b2c2ca095655141e';
-  const baseUrl = process.env.SERP_BASE_URL || 'https://serpapi.com/search.json';
+  const serpApiKey = process.env.SERP_API_KEY;
+  const baseUrl = process.env.SERP_BASE_URL;
   const params = {
     engine: 'google_maps_reviews',
     place_id: placeId,
@@ -73,11 +60,13 @@ async function checkForNewReviews(placeId) {
   const reviewCount = await getReviewCountFromDb(placeId);
   const latestReviews = await fetchLatestReviewsFromSerpApi(placeId, reviewCount);
 
-  if (latestReviews > reviewCount) {
-    return latestReviews;
+  if (Number(reviewCount) !== Number(latestReviews)) {
+    console.log(`latestReviews: ${latestReviews}, reviewCount: ${reviewCount}`);
+    console.log('Novos reviews encontrados!');
+    return true;
   }
 
-  return null;
+  return false;
 }
 
 async function getReviewsFromDb(placeId) {
@@ -96,10 +85,10 @@ async function getReviewsFromDb(placeId) {
 }
 
 async function fetchGoogleReviews(placeId) {
-  const serpApiKey = process.env.SERP_API_KEY || '5f01c68cad4db434b2d07dce18757cd1ebe0fffc6c18e2e3b2c2ca095655141e';
+  const serpApiKey = process.env.SERP_API_KEY;
   let reviews = [];
   let nextPageToken = null;
-  const baseUrl = process.env.SERP_BASE_URL || 'https://serpapi.com/search.json';
+  const baseUrl = process.env.SERP_BASE_URL;
   
   try {
     do {
@@ -161,18 +150,52 @@ async function saveReviewsToDB(reviews, placeId) {
   }
 }
 
+// Exemplo de ID de loja no Google Maps obtido pelo SerpApi;
+
+// Futuramente podemos adicionar mais lojas no banco e armazenar os IDs deles.
+// NEMA Humaitá = "place_id":"ChIJizElztN_mQARyfLk7REGZRc",
+// NEMA Padaria Visconde de Pirajá = "place_id":"ChIJhxTcDIrVmwARm0brYm21Hkw",
+// NEMA Leblon = "place_id":"ChIJF8dM_x_VmwARHGUmlUaKD5M"
+
+
 // Função principal que captura os reviews e salva no banco
 module.exports.scrapeReviews = async (event) => {
-  const placeId = 'ChIJhxTcDIrVmwARm0brYm21Hkw'; // Exemplo de ID de loja no Google Maps NEMA
+  const { context } = event.pathParameters;
+  if (!context) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: 'context na URL e obrigatório' }),
+    };
+  }
+
+  if (context !== 'nema_humaita' && context !== 'nema_visconde_de_piraja' && context !== 'nema_leblon') {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: 'context deve ser nema_humaita, nema_visconde_de_piraja ou nema_leblon' }),
+    };
+  }
+
+  let placeId;
+  switch (context) {
+    case 'nema_humaita':
+      placeId = 'ChIJizElztN_mQARyfLk7REGZRc';
+      break;
+    case 'nema_visconde_de_piraja':
+      placeId = 'ChIJhxTcDIrVmwARm0brYm21Hkw';
+      break;
+    case 'nema_leblon':
+      placeId = 'ChIJF8dM_x_VmwARHGUmlUaKD5M';
+      break;
+  }
+
   try {
     // Verifica se existem reviews no banco de dados
     const existingReviews = await getReviewsFromDb(placeId);
     if (existingReviews.length > 0) {
     // Verifica se existem novas reviews na API
-      const newReviewsNumber = await checkForNewReviews(placeId);
-      if (newReviewsNumber) {
-  // Armazena as novas reviews no banco de dados
-        const reviews = await fetchGoogleReviews(placeId, apiKey);
+      const updateReviews = await checkForNewReviews(placeId);
+      if (updateReviews) {
+        const reviews = await fetchGoogleReviews(placeId);
         await saveReviewsToDB(reviews, placeId);
         return {
           statusCode: 200,
@@ -188,7 +211,7 @@ module.exports.scrapeReviews = async (event) => {
     }
     
     // Caso não existam reviews no banco de dados, Captura todos os reviews pertentes ao ID da loja;
-    const reviews = await fetchGoogleReviews(placeId, apiKey);
+    const reviews = await fetchGoogleReviews(placeId);
     if (reviews.length === 0) {
       return {
         statusCode: 200,
