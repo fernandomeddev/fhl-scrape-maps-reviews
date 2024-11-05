@@ -8,7 +8,7 @@ provider:
 functions:
   scrapeReviews:
     handler: handler.scrapeReviews
-    timeout: 600
+    timeout: 300
     events:
       - http:
           path: reviews/{context}

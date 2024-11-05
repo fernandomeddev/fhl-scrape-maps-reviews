@@ -16,63 +16,38 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000,
 });
 
-async function getReviewCountFromDb(placeId) {
-  // Conectar ao banco de dados
+
+/**
+ * Retrieves ISO format dates of reviews for a given place from the database.
+ * 
+ * @param {string} placeId - The unique identifier for the place on Google Maps.
+ * @returns {Promise<string[]>} - A promise that resolves to an array of ISO date strings from the database.
+ * @throws Will throw an error if there is an issue querying the database.
+ */
+async function getReviewIsoDatesFromDb(placeId) {
   const client = await pool.connect();
   try {
-
-    // Consulta SQL para buscar o total de reviews existentes no banco
-    const result = await client.query('SELECT COUNT(*) FROM reviews WHERE place_id = $1', [placeId]);
-
-    // Obter o total de reviews
-    const reviewCount = result.rows[0].count;
-    return reviewCount;
+    // Consulta SQL para buscar todas as datas ISO dos reviews no banco
+    const result = await client.query('SELECT review_iso_date FROM reviews WHERE place_id = $1', [placeId]);
+    return result.rows.map(row => row.review_iso_date); // Retorna apenas as datas ISO
   } catch (error) {
-    console.error('Erro ao buscar reviews:', error);
+    console.error('Erro ao buscar datas de reviews:', error);
     throw error;
   } finally {
-    await client.end(); // Fechar a conexão com o banco
+    await client.release();
   }
 }
 
-async function fetchLatestReviewsFromSerpApi(placeId) {
-  const serpApiKey = process.env.SERP_API_KEY;
-  const baseUrl = process.env.SERP_BASE_URL;
-  const params = {
-    engine: 'google_maps_reviews',
-    place_id: placeId,
-    hl: 'en',
-    sort_by: 'newestFirst',
-    api_key: serpApiKey
-  };
-
-  try {
-    const response = await axios.get(baseUrl, { params });
-    return response.data.place_info.reviews;
-  } catch (error) {
-    console.error('Erro ao buscar reviews:', error);
-    throw error;
-  }
-
-}
-
-async function checkForNewReviews(placeId) {
-  const reviewCount = await getReviewCountFromDb(placeId);
-  const latestReviews = await fetchLatestReviewsFromSerpApi(placeId, reviewCount);
-
-  if (Number(reviewCount) !== Number(latestReviews)) {
-    console.log(`latestReviews: ${latestReviews}, reviewCount: ${reviewCount}`);
-    console.log('Novos reviews encontrados!');
-    return true;
-  }
-
-  return false;
-}
-
+/**
+ * Retrieves all reviews for a given place from the database, ordered by date in descending order.
+ * 
+ * @param {string} placeId - The unique identifier for the place on Google Maps.
+ * @returns {Promise<Object[]>} - A promise that resolves to an array of review objects from the database.
+ * @throws Will throw an error if there is an issue querying the database.
+ */
 async function getReviewsFromDb(placeId) {
   const client = await pool.connect();
   try {
-
     // Consulta SQL para buscar os reviews existentes no banco
     const result = await client.query('SELECT * FROM reviews WHERE place_id = $1 ORDER BY review_iso_date DESC', [placeId]);
     return result.rows; // Retorna os reviews do banco de dados
@@ -80,17 +55,84 @@ async function getReviewsFromDb(placeId) {
     console.error('Erro ao consultar reviews no banco de dados:', error);
     throw error;
   } finally {
-    await client.end(); // Fechar a conexão com o banco
+    await client.release();
   }
 }
 
-async function fetchGoogleReviews(placeId) {
+
+/**
+ * Fetches the latest reviews from the SerpApi for a given place and compares them with existing reviews in the database.
+ * 
+ * @param {string} placeId - The unique identifier for the place on Google Maps.
+ * @param {Array} reviewsInDb - Array containing the existing reviews in the database for the specified place.
+ * @returns {Promise<Object>} - A promise that resolves to an object containing success status, data about new reviews count, and a message indicating the result.
+ * 
+ * @throws Will return an error message if the SerpApi key is not configured correctly or is invalid.
+ * 
+ * The function checks for the number of reviews available from SerpApi and compares it with the count of reviews in the database.
+ * If there are new reviews, it fetches them and updates the database, otherwise, it returns a message indicating no new reviews were found.
+ */
+async function fetchLatestReviewsFromSerpApi(placeId, reviewsInDb) {
+  const serpApiKey = process.env.SERP_API_KEY;
+  const baseUrl = process.env.SERP_BASE_URL;
+  const params = {
+    engine: 'google_maps_reviews',
+    place_id: placeId,
+    hl: 'en',
+    sort_by: 'newestFirst',
+    api_key: serpApiKey,
+    no_cache: true
+  };
+  const httpResponse = await axios.get(baseUrl, { params }).then(response => response)
+    .catch((error) => {
+      return false
+    });
+
+  if (!httpResponse) {
+    const oldReviews = {
+      count: reviewsInDb.length,
+      reviews: reviewsInDb
+    };
+    return {
+      success: false,
+      data: oldReviews,
+      message: 'Para obter os reviews, verifique se o API Key do SERP API foi configurado corretamente ou esta válido.'
+    };
+  }
+  const responseCount = Number(httpResponse.data.place_info.reviews);
+  const reviewsInDbCount = Number(reviewsInDb);
+
+  const newReviewsCount = responseCount - reviewsInDbCount;
+  if (newReviewsCount !== 0) {
+    const existingIsoDates = await getReviewIsoDatesFromDb(placeId);
+    await fetchGoogleReviews(placeId, [ existingIsoDates ]);
+    return {
+      success: true,
+      data: newReviewsCount,
+      message: newReviewsCount +' Novos reviews encontrados.'
+    };
+  } 
+
+  return {
+    success: true,
+    data: 0,
+    message: 'Nenhum novo review encontrado.'
+  };
+}
+
+/**
+ * Fetches reviews from Google Maps for a given place ID.
+ * The function will make requests to the SERP API until all reviews are fetched.
+ * If there is an error while fetching reviews, the function will return the current reviews in the database.
+ * @param {string} placeId - The place ID for which to fetch reviews.
+ * @param {string[]} reviewsInDbIsoDates - An array of ISO dates of reviews already in the database.
+ * @returns {Promise<{success: boolean, data: {count: number, list: Review[]}, message: string}>} - A promise that resolves to an object with a success flag, data and a message.
+ */
+async function fetchGoogleReviews(placeId, reviewsInDbIsoDates) {
   const serpApiKey = process.env.SERP_API_KEY;
   let reviews = [];
   let nextPageToken = null;
   const baseUrl = process.env.SERP_BASE_URL;
-  
-  try {
     do {
       const params = {
         engine: 'google_maps_reviews',
@@ -98,13 +140,31 @@ async function fetchGoogleReviews(placeId) {
         hl: 'en',
         sort_by: 'newestFirst',
         api_key: serpApiKey,
+        no_cache: true
       };
 
       if (nextPageToken) {
         params['next_page_token'] = nextPageToken;
       }
 
-      const response = await axios.get(baseUrl, { params });
+      const response = await axios.get(baseUrl, { params }).catch((error) => {
+        return false
+      });
+
+      if (!response) {
+        currentReviews = await getReviewsFromDb(placeId)
+        const oldList = {
+          count: currentReviews.length,
+          list: currentReviews
+        }
+        return {
+          success: false,
+          data: oldList,
+          message: 'Para obter os reviews mais atuais, verifique se o API Key do SERP API foi configurado corretamente ou esta válido.'
+        };
+      }
+
+      console.log(`Received ${response.data.reviews.length} reviews`);
       const data = response.data;
 
       if (data.reviews) {
@@ -115,15 +175,19 @@ async function fetchGoogleReviews(placeId) {
       nextPageToken = data.serpapi_pagination?.next_page_token || null;
     } while (nextPageToken);
 
-    return reviews;
-
-  } catch (error) {
-    console.error('Error fetching reviews:', error);
-    throw new Error('Failed to fetch reviews');
-  }
+  return reviews;
 }
 
-// Função para armazenar reviews no banco de dados PostgreSQL
+/**
+ * Saves an array of review objects to the PostgreSQL database for a specified place.
+ *
+ * @param {Array} reviews - An array of review objects to be saved in the database. Each review object should contain 
+ *                          the user's name, rating, snippet, date, and ISO date.
+ * @param {string} placeId - The unique identifier for the place on Google Maps to associate with the reviews.
+ *
+ * The function connects to the database and inserts each review into the 'reviews' table. It logs an error if any 
+ * issues occur during the process and ensures the database connection is released back to the pool after completion.
+ */
 async function saveReviewsToDB(reviews, placeId) {
   const client = await pool.connect(); // Pega uma conexão do pool
   try {
@@ -150,28 +214,25 @@ async function saveReviewsToDB(reviews, placeId) {
   }
 }
 
-// Exemplo de ID de loja no Google Maps obtido pelo SerpApi;
-
-// Futuramente podemos adicionar mais lojas no banco e armazenar os IDs deles.
-// NEMA Humaitá = "place_id":"ChIJizElztN_mQARyfLk7REGZRc",
-// NEMA Padaria Visconde de Pirajá = "place_id":"ChIJhxTcDIrVmwARm0brYm21Hkw",
-// NEMA Leblon = "place_id":"ChIJF8dM_x_VmwARHGUmlUaKD5M"
-
-
-// Função principal que captura os reviews e salva no banco
+/**
+ * Handles HTTP requests to scrape and save Google Map reviews for a given place based on the provided context.
+ * 
+ * It determines the place ID from the context and checks for existing reviews in the database. 
+ * If no reviews exist or new reviews are available, it fetches them from the SerpApi, updates the database, 
+ * and returns the list of saved reviews. Returns appropriate HTTP status codes and messages for different outcomes.
+ * 
+ * @param {Object} event - The event object containing request parameters.
+ * @param {Object} event.pathParameters - The path parameters from the request.
+ * @param {string} event.pathParameters.context - The context string to determine the place ID.
+ * 
+ * @returns {Promise<Object>} - A promise that resolves to an HTTP response object with a status code and message.
+ */
 module.exports.scrapeReviews = async (event) => {
   const { context } = event.pathParameters;
   if (!context) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ error: 'context na URL e obrigatório' }),
-    };
-  }
-
-  if (context !== 'nema_humaita' && context !== 'nema_visconde_de_piraja' && context !== 'nema_leblon') {
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ error: 'context deve ser nema_humaita, nema_visconde_de_piraja ou nema_leblon' }),
+      body: JSON.stringify({ error: 'context na URL é obrigatório' }),
     };
   }
 
@@ -186,45 +247,78 @@ module.exports.scrapeReviews = async (event) => {
     case 'nema_leblon':
       placeId = 'ChIJF8dM_x_VmwARHGUmlUaKD5M';
       break;
+    default:
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: 'context inválido' }),
+      };
   }
 
   try {
-    // Verifica se existem reviews no banco de dados
+    // Buscar os reviews já armazenados no banco
     const existingReviews = await getReviewsFromDb(placeId);
-    if (existingReviews.length > 0) {
-    // Verifica se existem novas reviews na API
-      const updateReviews = await checkForNewReviews(placeId);
-      if (updateReviews) {
-        const reviews = await fetchGoogleReviews(placeId);
-        await saveReviewsToDB(reviews, placeId);
+
+    // Se não houver reviews no banco, busca novos reviews da API e salva no banco
+    if (!existingReviews || existingReviews.length === 0) {
+      // Buscar novos reviews da API
+      const reviews = await fetchGoogleReviews(placeId);
+      if (!reviews.success) {
+        const lastReviewsList = {
+          count: currentReviews.length,
+          list: currentReviews
+        }
         return {
-          statusCode: 200,
-          body: JSON.stringify({ message: `Reviews atualizadas com sucesso!`, data: newReviews }),
-        };
-      } else {
-        const reviews = await getReviewsFromDb(placeId);
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ message: `Existem ${reviews.length} reviews no banco de dados.`, data: reviews }),
+          statusCode: 206,
+          body: JSON.stringify({data: lastReviewsList, message: reviews.message,  }),
         };
       }
     }
-    
-    // Caso não existam reviews no banco de dados, Captura todos os reviews pertentes ao ID da loja;
-    const reviews = await fetchGoogleReviews(placeId);
-    if (reviews.length === 0) {
+    // Busca se existem novos reviews via API
+    const newReviewsCount = await fetchLatestReviewsFromSerpApi(placeId, existingReviews);
+    if (!newReviewsCount.success) {
+      const lastReviewsList = {
+        count: existingReviews.length,
+        list: existingReviews
+      }
       return {
-        statusCode: 200,
-        body: JSON.stringify({ message: 'Nenhuma review capturada!' }),
-      };
+        statusCode: 206,
+        body: JSON.stringify({ data:lastReviewsList, message: newReviewsCount.message }),
+      }
     }
 
-    // Armazena as reviews no banco de dados
-    await saveReviewsToDB(reviews, placeId);
+    if (newReviewsCount.data === 0) {
+      // Se nenhuma nova review foi encontrada, retorna os reviews existentes no banco
+      return {
+        statusCode: 200,
+        data: existingReviews,
+        body: JSON.stringify({ message: `Nenhum review novo encontrado. Exibindo ${existingReviews.length} reviews existentes no banco de dados.`, data: existingReviews }),
+      };
+    }
+    
+    // Se existirem reviews novos, comparar com os reviews existentes no banco e salvar apenas os novos
+    const reviews = await fetchGoogleReviews(placeId);
+    if (!reviews.success) {
+      const lastReviewsList = {
+        count: existingReviews.length,
+        list: existingReviews
+      }
+      return {
+        statusCode: 206,
+        body: JSON.stringify({data: lastReviewsList, message: reviews.message }),
+      }
+    }
+
+    const newReviewsToSave = reviews.data.filter(review => !existingReviews.some(
+      existingReview => existingReview.review_iso_date === review.review_iso_date
+    ));
+
+    const newReviews = await saveReviewsToDB(newReviewsToSave, placeId, existingIsoDates);
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: `Salvos ${reviews.length} reviews com sucesso!`, data: reviews }),
+      data: newReviews,
+      body: JSON.stringify({ count: newReviews.length, data: newReviews, message: 'novos reviews capturados' }),
     };
+
   } catch (error) {
     console.error('Erro ao capturar e salvar reviews:', error);
     return {

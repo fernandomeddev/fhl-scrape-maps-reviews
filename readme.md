@@ -61,7 +61,7 @@ O **SerpApi** é uma API específica para scraping de dados de mecanismos de bus
 
 ### Escolha da Melhor Alternativa
 
-A **utilização do SerpApi** se apresenta como a melhor alternativa para este projeto devido aos seguintes fatores:
+**utilização do SerpApi** se apresenta como a melhor alternativa para este projeto devido aos seguintes fatores:
 - **Facilidade e agilidade na implementação**, já que a API oferece endpoints prontos para captura de reviews.
 - **Escalabilidade e menor manutenção** em comparação com web scraping manual.
 - **Custo controlado** em comparação com a API oficial do Google.
